@@ -7,4 +7,8 @@ pub(crate) struct Args {
 
     #[arg(short,long)]
     pub port: u16,
+
+    #[clap(default_value = "127.0.0.1")]
+    #[arg(short,long)]
+    pub addr: String,
 }

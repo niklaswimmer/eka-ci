@@ -1,9 +1,11 @@
 mod cli;
+
 use clap::Parser;
 use log::info;
 use warp::Filter;
 use chrono::Local;
 use std::io::Write;
+use std::net::Ipv4Addr;
 
 const LOG_TARGET: &str = "eka-ci::server::main";
 
@@ -28,10 +30,11 @@ async fn main() {
     .map(|| format!("Welcome to Eka-CI"));
 
     let routes = warp::get().and(about.or(root));
+    let addr = args.addr.parse::<Ipv4Addr>().expect("Invalid addr");
 
-    info!(target: LOG_TARGET, "Serving Eka-CI on port: {}", args.port);
+    info!(target: LOG_TARGET, "Serving Eka-CI on {}:{}", args.addr, args.port);
 
     warp::serve(routes)
-    .run(([127, 0, 0, 1], args.port))
+    .run((addr, args.port))
     .await
 }
