@@ -1,11 +1,10 @@
 mod cli;
+mod server_client;
 mod error;
-mod requests;
 
 use chrono::Local;
 use clap::Parser;
 use cli::Commands;
-use requests::send_request;
 use shared::types::ClientRequest;
 use std::io::Write;
 use crate::error::Result;
@@ -23,10 +22,14 @@ fn main() -> Result <()> {
         }).init();
 
     let args = cli::Args::parse();
+    let client = server_client::Client::new(args.socket);
 
     match &args.command {
         Some(Commands::Info) => {
-            send_request(args, ClientRequest::Info)?;
+            client.send_request(ClientRequest::Info)?;
+        },
+        Some(Commands::Eval(ref eval_request)) => {
+            client.send_request(ClientRequest::Eval(eval_request.clone()))?;
         },
         Some(Commands::Status) => {
         },

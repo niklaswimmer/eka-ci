@@ -42,3 +42,13 @@ impl From<octocrab::Error> for self::Error {
 }
 
 pub type Result<T, E = self::Error> = std::result::Result<T, E>;
+
+/// This just logs the error and consumes the result
+/// Intended for actions which shouldn't crash the application
+pub fn log_if_error<T>(result: Result<T>) {
+    use log::error;
+
+    if let Err(e) = result {
+        error!("{:?}", e);
+    }
+}

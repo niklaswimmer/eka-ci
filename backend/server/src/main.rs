@@ -1,5 +1,6 @@
 mod cli;
 mod client;
+mod eval;
 mod github;
 mod error;
 mod web;
@@ -39,8 +40,13 @@ async fn main() -> Result<()> {
     );
 
     let rt = Runtime::new()?;
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let evaluator = crate::eval::Evaluator::new(rx);
 
-    rt.spawn(async { client::listen_for_client(socket) });
+    rt.spawn(async {
+        let client = client::ClientListener::new(socket, tx);
+        error::log_if_error(client.listen_for_client());
+    });
 
     if let Err(e) = github::register_app().await {
         warn!(target: &LOG_TARGET, "Failed to register as github app: {:?}", e);
