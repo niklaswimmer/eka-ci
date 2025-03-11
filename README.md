@@ -11,6 +11,7 @@ large nix package repositories. In particular, the tool should provide:
   - Captured logs
   - Explore dependency failures (similar to hydra)
   - (Stretch goal) Diffoscope like diff of package outputs?
+  - (Strech goal) diffs of NixOS configurations.
 
 Ultimately, this tool is meant to answer, "should I merge this PR" in the quickest manner possible.
 Curating a Nix repository should not be highly limited to manual review processes of a reviewer.
