@@ -48,3 +48,22 @@ Frontend
   - [ ] Metrics view: build+runtime closure size and dependencies
   - [ ] Added, removed, [newly/still] building, [newly/still] failing builds
   - [ ] Allow for approvals + merges
+
+# (Future) Evaluation modes
+
+- "Legacy" (needed for MVP)
+  - Similar to "legacy jobsets" in hydra.
+  - Allows for an arbitrary expression to be evaluated returning an attrset of derivations
+  - A diff of new/changed/removed attrs from the base branch to head branch will create a "check_run" for each new and changed drv
+- "OfBorg" Convention
+  - Read attr path from commit message to determine package rebuild to rebuild
+  - (For ekapkgs and userpkgs) would like for the ability to select downstream build strategy
+    - For ekapkgs, just have the package in question and immediate referrers rebuild
+    - For userpkgs, just limit to the package in question. Unlikely to have dependencies to other userpkgs'
+- Flake checks
+  - Similar to garnix
+  - Simple, "for each check, create a check_run with the status"
+- Flake develop actions
+  - For use with `nix develop --command <impure command>`
+  - Similar to gitlab's script runner, just impurely runs code
+  - Devshell is retained through gcroots
