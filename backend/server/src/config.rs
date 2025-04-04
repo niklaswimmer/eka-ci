@@ -2,6 +2,8 @@ use std::{
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
 };
+#[cfg(feature = "bundle-proxy")]
+use std::num::NonZeroU16;
 
 use anyhow::Context;
 use clap::Parser;
@@ -30,6 +32,16 @@ struct ConfigCli {
     /// Path for the frontend bundle. Frontend will be disabled if not provided.
     #[arg(short, long)]
     pub bundle_path: Option<PathBuf>,
+
+    /// The local port where all requests for the frontend should be forwarded to.
+    ///
+    /// This is a DEVELOPMENT TOOL. For a production deployment, use [bundle] instead!
+    ///
+    /// The main use case for this flag is to specify the port of a locally running hot reloading
+    /// server, such as `live-server` or `elm-live`.
+    #[cfg(feature = "bundle-proxy")]
+    #[arg(long)]
+    pub bundle_port: Option<NonZeroU16>,
 
     /// Path for the sqlite db path. Defaults to $XDG_DATA_HOME/ekaci/sqlite.db
     #[arg(short, long)]
@@ -83,6 +95,23 @@ pub struct ConfigWeb {
 pub enum SpaBundle {
     Disabled,
     Path(PathBuf),
+    #[cfg(feature = "bundle-proxy")]
+    Proxy(NonZeroU16),
+}
+
+impl std::fmt::Display for SpaBundle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SpaBundle::Disabled => write!(f, "frontend disabled"),
+            SpaBundle::Path(path) => write!(
+                f,
+                "frontend from {}",
+                path.canonicalize().unwrap_or(path.to_owned()).display()
+            ),
+            #[cfg(feature = "bundle-proxy")]
+            SpaBundle::Proxy(port) => write!(f, "frontend from http://127.0.0.1:{port}"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -117,10 +146,18 @@ impl Config {
                         .unwrap_or_else(|| Ipv4Addr::new(127, 0, 0, 1)),
                     args.port.or(file.web.port).unwrap_or(3030),
                 ),
-                spa_bundle: args
-                    .bundle_path
-                    .or(file.web.bundle_path)
-                    .map_or(SpaBundle::Disabled, SpaBundle::Path),
+                spa_bundle: {
+                    #[cfg(feature = "bundle-proxy")]
+                    let bundle_port = args.bundle_port.map(SpaBundle::Proxy);
+                    #[cfg(not(feature = "bundle-proxy"))]
+                    let bundle_port: Option<SpaBundle> = None;
+
+                    bundle_port.unwrap_or_else(|| {
+                        args.bundle_path
+                            .or(file.web.bundle_path)
+                            .map_or(SpaBundle::Disabled, SpaBundle::Path)
+                    })
+                },
             },
             unix: ConfigUnix {
                 socket_path: match args.socket.or(file.unix.socket_path) {

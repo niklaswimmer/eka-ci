@@ -1,11 +1,10 @@
+use anyhow::{Context, Result};
+use axum::{routing::get, Router};
+use http::StatusCode;
 use std::{
     net::{SocketAddr, SocketAddrV4},
     path::Path,
 };
-
-use anyhow::{Context, Result};
-use axum::{routing::get, Router};
-use http::StatusCode;
 use tokio::net::TcpListener;
 use tower_http::{
     services::{ServeDir, ServeFile},
@@ -35,21 +34,32 @@ impl WebService {
             .expect("getsockname should always succeed on a properly initialized listener")
     }
 
-    pub async fn run(self, spa_bundle_path: &SpaBundle) {
+    pub async fn run(self, spa_bundle: &SpaBundle) {
         let app = Router::new().nest("/api/v1", api_routes());
 
-        let app = if let SpaBundle::Path(spa_bundle_path) = spa_bundle_path {
-            // If nothing else matched, always return the SPA. The client application has its own
-            // router, which it will use to handle the requested the path.
-            app.fallback_service(spa_service(&spa_bundle_path))
-        } else {
-            // Make sure to include some information on why there is no UI showing.
-            app.fallback(|| async {
-                (
-                    StatusCode::NOT_FOUND,
-                    "This instance of Eka CI has been started with the web interface disabled.",
-                )
-            })
+        let app = match spa_bundle {
+            SpaBundle::Path(spa_bundle_path) => {
+                // If nothing else matched, always return the SPA. The client application has its own
+                // router, which it will use to handle the requested the path.
+                app.fallback_service(spa_service(&spa_bundle_path))
+            }
+            #[cfg(feature = "bundle-proxy")]
+            SpaBundle::Proxy(spa_proxy_port) => {
+                use axum_reverse_proxy::ReverseProxy;
+                let proxy: Router =
+                    ReverseProxy::new("", &format!("http://127.0.0.1:{spa_proxy_port}")).into();
+
+                app.fallback_service(proxy)
+            }
+            SpaBundle::Disabled => {
+                // Make sure to include some information on why there is no UI showing.
+                app.fallback(|| async {
+                    (
+                        StatusCode::NOT_FOUND,
+                        "This instance of Eka CI has been started with the web interface disabled.",
+                    )
+                })
+            }
         };
 
         axum::serve(self.listener, app)
