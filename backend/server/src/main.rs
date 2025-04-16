@@ -1,5 +1,6 @@
 mod client;
 mod config;
+mod db;
 mod github;
 mod web;
 
@@ -25,10 +26,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-
     debug!("Using configuration {config:?}");
 
-    let unix_servie = UnixService::bind_to_path(&config.unix.socket_path)
+    db::initialize(&config.db_path.display().to_string())
+        .await
+        .context("attempted to create DB pool")?;
+
+    let unix_service = UnixService::bind_to_path(&config.unix.socket_path)
         .await
         .context("failed to start unix service")?;
     let web_service = WebService::bind_to_address(&config.web.address)
@@ -60,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
     );
     info!(
         "Listening for client connection on {}",
-        unix_servie
+        unix_service
             .bind_addr()
             .as_pathname()
             .map_or("<<unnamed socket>>".to_owned(), |path| path
@@ -68,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
                 .to_string())
     );
 
-    tokio::spawn(async { unix_servie.run().await });
+    tokio::spawn(async { unix_service.run().await });
     web_service.run(&config.web.spa_bundle).await;
 
     Ok(())
