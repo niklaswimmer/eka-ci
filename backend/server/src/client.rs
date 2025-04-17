@@ -84,7 +84,7 @@ async fn handle_client(mut stream: UnixStream) -> Result<()> {
     let message: t::ClientRequest = serde_json::from_str(&request_message)?;
     debug!("Got message from client: {:?}", &message);
 
-    let response = handle_request(message);
+    let response = handle_request(message).await;
     let response_message = serde_json::to_string(&response)?;
 
     stream.write_all(response_message.as_bytes()).await?;
@@ -95,7 +95,7 @@ async fn handle_client(mut stream: UnixStream) -> Result<()> {
     Ok(())
 }
 
-fn handle_request(request: ClientRequest) -> ClientResponse {
+async fn handle_request(request: ClientRequest) -> ClientResponse {
     use shared::types as t;
     use shared::types::ClientRequest as req;
     use shared::types::ClientResponse as resp;
@@ -105,5 +105,16 @@ fn handle_request(request: ClientRequest) -> ClientResponse {
             status: t::ServerStatus::Active,
             version: "0.1.0".to_string(),
         }),
+        req::Build(build_info) => {
+            // TODO: we should not be doing this operation on the response thread
+            // Instead, we should be sending a message for the evaluator service to traverse this
+            let enqueued_drvs =
+                crate::nix::traverse_drvs(&build_info.drv_path).expect("Failed to query drv graph");
+
+            // TODO: We should likely return a URL to build status
+            resp::Build(t::BuildResponse {
+                drv_id: enqueued_drvs.len() as u64,
+            })
+        }
     }
 }
