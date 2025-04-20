@@ -82,13 +82,6 @@ pub struct DrvBuildEvent {
     /// The derivation build this event is associated with.
     pub build: DrvBuildId,
 
-    /// Globally monotonically increasing numeric event identifier. Use this to determine the order
-    /// of events. Events with a higher id happened after events with a lower id.
-    ///
-    /// Since this id is global it can be used to retrieve the latest build state for a derivation
-    /// without having to check the [`DrvBuildId::build_attempt`].
-    pub event_id: u32,
-
     /// The build state this event propagates.
     pub state: DrvBuildState,
 
@@ -99,10 +92,7 @@ pub struct DrvBuildEvent {
     /// scheduled ([`DrvBuildState::Pending`]) and started ([`DrvBuildState::Building`]) within the
     /// same second.
     ///
-    /// Using a higher accuracy timestamp would make it incompatible with SQlite's datetime
-    /// functions which is also not desirable.
-    ///
-    /// Instead, use [`event_id`][Self::event_id] to determine the order of events.
+    /// Instead, use the table's ROWID to sort the events during select.
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
