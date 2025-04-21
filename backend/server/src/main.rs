@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let (eval_sender, eval_receiver) = channel::<String>(1000);
     let eval_service = nix::EvalService::new(eval_receiver);
     eval_service.run();
-    let _db_service = db::DbService::new(&config.db_path.display().to_string())
+    let _db_service = db::DbService::new(&config.db_path)
         .await
         .context("attempted to create DB pool")?;
 

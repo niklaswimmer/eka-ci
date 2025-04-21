@@ -1,43 +1,45 @@
 pub mod insert;
 
+use std::path::Path;
+
 use sqlx::migrate;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool};
-use tracing::debug;
+use tracing::{debug, info};
 
 #[derive(Clone)]
 pub struct DbService {
-    conn: SqlitePool,
+    pool: SqlitePool,
 }
 
 impl DbService {
-    pub async fn new(connection: &str) -> anyhow::Result<DbService> {
-        use std::path::Path;
+    pub async fn new(location: &Path) -> anyhow::Result<DbService> {
+        info!("Initializing SQLite database at {}", location.display());
 
-        debug!("Creating SQLite database pool at {}", connection);
-
-        // Create the parent directories to the db path if they do not exist
-        let db_path_parent = Path::new(connection).parent().expect("Inavlid db path");
-        if !db_path_parent.exists() {
-            std::fs::create_dir_all(db_path_parent)?;
+        // SQlite does itself not create any directories, so we need to ensure the parent of the
+        // database path already exists before creating the pool.
+        // If the path has no parent (because it is directly under the root for example), we just
+        // assume that the parent already exists. If it did in fact not, the SQlite pool creation
+        // will fail, but such cases are considered a user error.
+        if let Some(parent) = location.parent() {
+            std::fs::create_dir_all(parent)?;
         }
 
         let opts = SqliteConnectOptions::new()
-            .filename(connection)
+            .filename(location)
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal);
+        debug!("Creating database pool with {:?}", opts);
+
         let pool: SqlitePool = SqlitePool::connect_with(opts).await?;
-        debug!("Finished creating SQLite database connection pool");
 
-        // TODO: allow for path to be set, needs to be available at deployment time
-        debug!("Attempting SQL migrations");
+        info!("Running database migrations");
         migrate!("sql/migrations").run(&pool).await?;
-        let service = DbService { conn: pool };
 
-        Ok(service)
+        Ok(DbService { pool })
     }
 
     #[allow(dead_code)]
     pub async fn insert_drv(&self, drv_path: &str, system: &str) -> anyhow::Result<i64> {
-        insert::new_drv(drv_path, system, self.conn.clone()).await
+        insert::new_drv(drv_path, system, self.pool.clone()).await
     }
 }
