@@ -2,16 +2,29 @@ use anyhow;
 use sqlx;
 use sqlx::SqlitePool;
 
-/// This is meant to record a drv for building without any associated status
-/// Because this does INSERT OR IGNORE the id returned may not be drv inserted,
-/// it is assumed that we already checked the drv did not already exist in the db
-pub async fn new_drv(drv_path: &str, system: &str, pool: SqlitePool) -> anyhow::Result<i64> {
-    let id = sqlx::query("INSERT OR IGNORE INTO Drv (drv_path, platform) VALUES ($1, $2)")
-        .bind(drv_path)
-        .bind(system)
-        .execute(&pool)
-        .await?
-        .last_insert_rowid();
+use super::model::build::DrvBuildMetadata;
+
+/// Build attempt needs to be a new one.
+/// Passwords contained in the git_repo URL are stored as clear text.
+pub async fn new_drv_build_metadata(
+    metadata: &DrvBuildMetadata,
+    pool: &SqlitePool,
+) -> anyhow::Result<i64> {
+    let id = sqlx::query(
+        r#"
+INSERT INTO DrvBuildMetadata
+(derivation, build_attempt, git_repo, git_commit, build_command)
+VALUES ($1, $2, $3, $4, $5)
+        "#,
+    )
+    .bind(&metadata.build.derivation)
+    .bind(metadata.build.build_attempt)
+    .bind(&metadata.git_repo)
+    .bind(&metadata.git_commit)
+    .bind(&metadata.build_command)
+    .execute(pool)
+    .await?
+    .last_insert_rowid();
 
     Ok(id)
 }
