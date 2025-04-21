@@ -1,10 +1,10 @@
-pub mod insert;
-
 use std::path::Path;
 
 use sqlx::migrate;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool};
 use tracing::{debug, info};
+
+use super::insert;
 
 #[derive(Clone)]
 pub struct DbService {
