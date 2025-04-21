@@ -8,7 +8,12 @@
 //!
 //! During the build process several [`DrvBuildEvent`] entries are inserted into the database. The
 //! latest of these entries is the current build status.
-use std::{iter::Map, num::NonZero, path::PathBuf};
+use std::{borrow::Cow, collections::HashMap, num::NonZeroU32, path::PathBuf};
+
+use serde::{Deserialize, Serialize};
+use sqlx::{encode::IsNull, sqlite::SqliteArgumentValue, Decode, Encode, Sqlite, Type};
+
+use crate::db::model::git::{GitCommit, GitRepo};
 
 /// Unique identifier for a derivation build attempt.
 ///
@@ -29,7 +34,7 @@ pub struct DrvBuildId {
     /// This counter is intended for cases in which the derivation build was interrupted due to
     /// external factors (see [`DrvBuildState::Interrupted`]). In these situations it may make sense
     /// to reattempt the build (depending on the interruption kind).
-    pub build_attempt: NonZero<u32>,
+    pub build_attempt: NonZeroU32,
 }
 
 /// Metadata about a derivation build.
@@ -42,21 +47,22 @@ pub struct DrvBuildMetadata {
     pub build: DrvBuildId,
 
     /// The Git repository this derivation build originates from.
-    pub git_repo: gix_url::Url,
+    pub git_repo: GitRepo,
 
     /// The Git commit this derivation build originates from.
     ///
     /// Note that this may not be the only commit that can produce this derivation. Because a
     /// derivation only needs to fully build once, later commits may still include this
     /// derivation but do not trigger a new build.
-    pub git_commit: gix_hash::ObjectId,
+    pub git_commit: GitCommit,
 
     /// The Nix command that was used to build this derivation.
     pub build_command: DrvBuildCommand,
 }
 
 /// Command used to build the derivation.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")] // use internally tagged serialization
 pub enum DrvBuildCommand {
     /// Build a single attribute.
     SingleAttr {
@@ -68,12 +74,41 @@ pub enum DrvBuildCommand {
         /// Nix arguments.
         args: Vec<String>,
         /// Environment variables for the subprocess.
-        env: Map<String, String>,
+        env: HashMap<String, String>,
         /// The `.nix` file that contains the attribute.
         file: PathBuf,
         /// The attribute to build.
         attr: String,
     },
+}
+
+impl<'q> Encode<'q, Sqlite> for DrvBuildCommand {
+    fn encode_by_ref(
+        &self,
+        buf: &mut <Sqlite as sqlx::Database>::ArgumentBuffer<'q>,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        let encoded = serde_json::to_string(self)?;
+        buf.push(SqliteArgumentValue::Text(Cow::Owned(encoded)));
+
+        Ok(IsNull::No)
+    }
+}
+
+impl<'r> Decode<'r, Sqlite> for DrvBuildCommand {
+    fn decode(
+        value: <Sqlite as sqlx::Database>::ValueRef<'r>,
+    ) -> Result<Self, sqlx::error::BoxDynError> {
+        let value = <&str as Decode<Sqlite>>::decode(value)?;
+        let command = serde_json::from_str(value)?;
+
+        Ok(command)
+    }
+}
+
+impl Type<Sqlite> for DrvBuildCommand {
+    fn type_info() -> <Sqlite as sqlx::Database>::TypeInfo {
+        <str as Type<Sqlite>>::type_info()
+    }
 }
 
 /// Emitted whenever a derivation build's state changes.
@@ -184,7 +219,8 @@ pub enum DrvBuildInterruptionKind {
 /// `0aykaqxhbby7mx7lgb217m9b3gkl52fn-source.drv`
 ///
 /// [^nix-by-hand]: <https://bernsteinbear.com/blog/nix-by-hand/>
-#[derive(Debug)]
+#[derive(Debug, Type)]
+#[sqlx(transparent)]
 pub struct DrvId(String);
 
 /// The edge in a derivation dependency DAG.

@@ -9,6 +9,7 @@ repository = "https://github.com/ekala-project/eka-ci"
 [dependencies]
 anyhow = { workspace = true }
 axum = { version = "0.8.3", features = ["tokio", "tracing", "json"] }
+bstr = "1.12.0"
 chrono = { version = "0.4.40", default-features = false, features = ["now", "std"] }
 clap = { workspace = true }
 envy = "0.4.2"
