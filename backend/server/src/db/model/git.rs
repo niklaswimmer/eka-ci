@@ -10,8 +10,8 @@ use sqlx::{encode::IsNull, sqlite::SqliteArgumentValue, Decode, Encode, Sqlite, 
 /// The URL is encoded as a string when stored in the database, so passwords will be visible as
 /// cleartext values. Therefore, do not store URLs with embedded password information in the
 /// database.
-#[derive(Debug)]
-pub struct GitRepo(gix_url::Url);
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GitRepo(pub gix_url::Url);
 
 impl<'q> Encode<'q, Sqlite> for GitRepo {
     fn encode_by_ref(
@@ -50,8 +50,8 @@ impl Type<Sqlite> for GitRepo {
 ///
 /// The commit object id is stored as hex digits in the database. Always the maximum hex length
 /// (i.e. 40 characters for SHA1) is stored.
-#[derive(Debug)]
-pub struct GitCommit(gix_hash::ObjectId);
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GitCommit(pub gix_hash::ObjectId);
 
 impl<'q> Encode<'q, Sqlite> for GitCommit {
     fn encode_by_ref(
