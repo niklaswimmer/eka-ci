@@ -11,15 +11,17 @@
 use std::{borrow::Cow, collections::HashMap, num::NonZeroU32, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sqlx::{encode::IsNull, sqlite::SqliteArgumentValue, Decode, Encode, Sqlite, Type};
+use sqlx::{encode::IsNull, sqlite::SqliteArgumentValue, Decode, Encode, FromRow, Sqlite, Type};
 
 use crate::db::model::git::{GitCommit, GitRepo};
+
+use super::ForInsert;
 
 /// Unique identifier for a derivation build attempt.
 ///
 /// Combines the derivation identifier with a counter that keeps track of the number of build
 /// attempts for that derivation.
-#[derive(Debug)]
+#[derive(Clone, Debug, FromRow)]
 pub struct DrvBuildId {
     /// The derivation that is attempted to be build.
     pub derivation: DrvId,
@@ -41,9 +43,10 @@ pub struct DrvBuildId {
 ///
 /// This metadata is useful to reproduce a build on a different machine. Note that in general,
 /// only builds that ended with a state of [`DrvBuildState::Completed`] can be reproduced.
-#[derive(Debug)]
+#[derive(Clone, Debug, FromRow)]
 pub struct DrvBuildMetadata {
     /// The derivation build this metadata is associated with.
+    #[sqlx(flatten)]
     pub build: DrvBuildId,
 
     /// The Git repository this derivation build originates from.
@@ -60,8 +63,27 @@ pub struct DrvBuildMetadata {
     pub build_command: DrvBuildCommand,
 }
 
+impl DrvBuildMetadata {
+    pub fn for_insert(
+        derivation: DrvId,
+        git_repo: GitRepo,
+        git_commit: GitCommit,
+        build_command: DrvBuildCommand,
+    ) -> ForInsert<Self> {
+        ForInsert(Self {
+            build: DrvBuildId {
+                derivation,
+                build_attempt: NonZeroU32::MAX,
+            },
+            git_repo,
+            git_commit,
+            build_command,
+        })
+    }
+}
+
 /// Command used to build the derivation.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")] // use internally tagged serialization
 pub enum DrvBuildCommand {
     /// Build a single attribute.
@@ -80,6 +102,20 @@ pub enum DrvBuildCommand {
         /// The attribute to build.
         attr: String,
     },
+}
+
+#[cfg(test)]
+impl DrvBuildCommand {
+    /// Returns a dummy build command. Useful for database inserts in tests.
+    pub fn dummy() -> Self {
+        Self::SingleAttr {
+            exec: "/bin/nix".into(),
+            args: Vec::new(),
+            env: HashMap::new(),
+            file: "/path/to/file.nix".into(),
+            attr: "hello".to_owned(),
+        }
+    }
 }
 
 impl<'q> Encode<'q, Sqlite> for DrvBuildCommand {
@@ -112,7 +148,7 @@ impl Type<Sqlite> for DrvBuildCommand {
 }
 
 /// Emitted whenever a derivation build's state changes.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DrvBuildEvent {
     /// The derivation build this event is associated with.
     pub build: DrvBuildId,
@@ -132,7 +168,7 @@ pub struct DrvBuildEvent {
 }
 
 /// Describes the possible states a derivation build can be in.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum DrvBuildState {
     /// Build is scheduled in a queue and has not yet started.
     Pending,
@@ -152,7 +188,7 @@ pub enum DrvBuildState {
 ///
 /// In essence, this enum captures whether the status code returned by the build command was `0`
 /// or not.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum DrvBuildResult {
     /// The derivation built successfully.
     Success,
@@ -181,7 +217,7 @@ impl DrvBuildResult {
 }
 
 /// Possible causes for why the derivation build was interrupted.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum DrvBuildInterruptionKind {
     /// Build process ran out of memory and was killed by the system.
     OutOfMemory,
@@ -219,15 +255,24 @@ pub enum DrvBuildInterruptionKind {
 /// `0aykaqxhbby7mx7lgb217m9b3gkl52fn-source.drv`
 ///
 /// [^nix-by-hand]: <https://bernsteinbear.com/blog/nix-by-hand/>
-#[derive(Debug, Type)]
+#[derive(Clone, Debug, PartialEq, Eq, Type)]
 #[sqlx(transparent)]
 pub struct DrvId(String);
+
+/// Constructors and methods useful for testing.
+#[cfg(test)]
+impl DrvId {
+    /// Returns a known good derivation identifier. Useful for database inserts in tests.
+    pub fn dummy() -> Self {
+        DrvId("jd83l3jn2mkn530lgcg0y523jq5qji85-hello-2.12.1.drv".to_owned())
+    }
+}
 
 /// The edge in a derivation dependency DAG.
 ///
 /// Maps a derivation to all the derivations it directly depends on and vice-versa to all the
 /// derivations that directly depend on it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DrvRefs {
     /// Also known as dependant or consumer.
     pub referrer: DrvId,

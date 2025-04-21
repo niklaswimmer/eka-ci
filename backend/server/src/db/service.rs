@@ -5,7 +5,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool};
 use tracing::{debug, info};
 
 use super::insert;
-use super::model::build::DrvBuildMetadata;
+use super::model::{build::DrvBuildMetadata, ForInsert};
 
 #[derive(Clone)]
 pub struct DbService {
@@ -40,7 +40,10 @@ impl DbService {
     }
 
     #[allow(dead_code)]
-    pub async fn insert_build(&self, metadata: &DrvBuildMetadata) -> anyhow::Result<i64> {
+    pub async fn insert_build(
+        &self,
+        metadata: ForInsert<DrvBuildMetadata>,
+    ) -> anyhow::Result<DrvBuildMetadata> {
         insert::new_drv_build_metadata(metadata, &self.pool).await
     }
 }
