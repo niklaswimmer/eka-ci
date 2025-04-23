@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS DrvBuildEvent (
     derivation TEXT NOT NULL,
     build_attempt INTEGER NOT NULL,
     state INTEGER NOT NULL,
-    timestamp TEXT NOT NULL DEFAULT (unixepoch())
+    timestamp INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
 -- Speed up queries that want to retrieve the state for a specific derivation.
