@@ -9,7 +9,7 @@ pub async fn new_drv_build_metadata(
     pool: &SqlitePool,
 ) -> anyhow::Result<DrvBuildMetadata> {
     let metadata = metadata.0;
-    let id = sqlx::query(
+    let metadata = sqlx::query_as(
         r#"
 INSERT INTO DrvBuildMetadata
     (derivation, git_repo, git_commit, build_command, build_attempt)
@@ -22,24 +22,13 @@ VALUES (
         1
     )
 )
+RETURNING derivation, build_attempt, git_repo, git_commit, build_command
         "#,
     )
     .bind(&metadata.build.derivation)
     .bind(&metadata.git_repo)
     .bind(&metadata.git_commit)
     .bind(&metadata.build_command)
-    .execute(pool)
-    .await?
-    .last_insert_rowid();
-
-    let metadata = sqlx::query_as(
-        r#"
-SELECT derivation, build_attempt, git_repo, git_commit, build_command
-FROM DrvBuildMetadata
-WHERE rowid = ?1
-        "#,
-    )
-    .bind(id)
     .fetch_one(pool)
     .await?;
 
