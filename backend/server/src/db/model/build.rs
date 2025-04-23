@@ -148,9 +148,10 @@ impl Type<Sqlite> for DrvBuildCommand {
 }
 
 /// Emitted whenever a derivation build's state changes.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRow)]
 pub struct DrvBuildEvent {
     /// The derivation build this event is associated with.
+    #[sqlx(flatten)]
     pub build: DrvBuildId,
 
     /// The build state this event propagates.
@@ -167,8 +168,18 @@ pub struct DrvBuildEvent {
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
+impl DrvBuildEvent {
+    pub fn for_insert(build: DrvBuildId, state: DrvBuildState) -> ForInsert<Self> {
+        ForInsert(Self {
+            build,
+            state,
+            timestamp: chrono::DateTime::<chrono::Utc>::MAX_UTC,
+        })
+    }
+}
+
 /// Describes the possible states a derivation build can be in.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DrvBuildState {
     /// Build is scheduled in a queue and has not yet started.
     Pending,
@@ -184,11 +195,89 @@ pub enum DrvBuildState {
     Blocked,
 }
 
+impl DrvBuildState {
+    pub fn as_i64(&self) -> i64 {
+        match self {
+            DrvBuildState::Pending => 1,
+            DrvBuildState::Building => 7, // a lucky number
+            DrvBuildState::Completed(drv_build_result) => match drv_build_result {
+                DrvBuildResult::Success => 42, // found the answer to the Ultimate Question of Life, the Universe, and Everything
+                DrvBuildResult::Failure => -1,
+            },
+            DrvBuildState::Interrupted(drv_build_interruption_kind) => {
+                match drv_build_interruption_kind {
+                    DrvBuildInterruptionKind::OutOfMemory => -404, // 404 Memory Not Found
+                    DrvBuildInterruptionKind::Timeout => -420,     // time for a timeout
+                    DrvBuildInterruptionKind::Cancelled => -86,    // cancel the order
+                    DrvBuildInterruptionKind::ProcessDeath => -666, // number of the beast
+                    DrvBuildInterruptionKind::SchedulerDeath => -13, // an unlucky number
+                }
+            }
+            DrvBuildState::Blocked => 11,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("invalid state number: {0}")]
+pub struct InvalidStateNumber(i64);
+
+impl TryFrom<i64> for DrvBuildState {
+    type Error = InvalidStateNumber;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Pending),
+            7 => Ok(Self::Building),
+            42 => Ok(Self::Completed(DrvBuildResult::Success)),
+            -1 => Ok(Self::Completed(DrvBuildResult::Failure)),
+            -404 => Ok(Self::Interrupted(DrvBuildInterruptionKind::OutOfMemory)),
+            -420 => Ok(Self::Interrupted(DrvBuildInterruptionKind::Timeout)),
+            -86 => Ok(Self::Interrupted(DrvBuildInterruptionKind::Cancelled)),
+            -666 => Ok(Self::Interrupted(DrvBuildInterruptionKind::ProcessDeath)),
+            -13 => Ok(Self::Interrupted(DrvBuildInterruptionKind::SchedulerDeath)),
+            11 => Ok(Self::Blocked),
+            _ => Err(InvalidStateNumber(value)),
+        }
+    }
+}
+
+impl<'q> Encode<'q, Sqlite> for DrvBuildState {
+    fn encode_by_ref(
+        &self,
+        buf: &mut <Sqlite as sqlx::Database>::ArgumentBuffer<'q>,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        buf.push(SqliteArgumentValue::Int64(self.as_i64()));
+
+        Ok(IsNull::No)
+    }
+
+    fn size_hint(&self) -> usize {
+        std::mem::size_of::<i64>()
+    }
+}
+
+impl<'r> Decode<'r, Sqlite> for DrvBuildState {
+    fn decode(
+        value: <Sqlite as sqlx::Database>::ValueRef<'r>,
+    ) -> Result<Self, sqlx::error::BoxDynError> {
+        let value = <i64 as Decode<Sqlite>>::decode(value)?;
+
+        Ok(value.try_into()?)
+    }
+}
+
+impl Type<Sqlite> for DrvBuildState {
+    fn type_info() -> <Sqlite as sqlx::Database>::TypeInfo {
+        <i64 as Type<Sqlite>>::type_info()
+    }
+}
+
 /// The result of building a derivation.
 ///
 /// In essence, this enum captures whether the status code returned by the build command was `0`
 /// or not.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DrvBuildResult {
     /// The derivation built successfully.
     Success,
@@ -217,7 +306,7 @@ impl DrvBuildResult {
 }
 
 /// Possible causes for why the derivation build was interrupted.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DrvBuildInterruptionKind {
     /// Build process ran out of memory and was killed by the system.
     OutOfMemory,
