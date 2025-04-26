@@ -181,38 +181,69 @@ impl DrvBuildEvent {
 /// Describes the possible states a derivation build can be in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DrvBuildState {
-    /// Build is scheduled in a queue and has not yet started.
-    Pending,
-    /// Build is currently running.
-    Building,
-    /// Build has completed, either successfully or not.
+    /// Derivation is waiting to be scheduled for building.
     ///
-    /// True means successful, false means an error was encountered while building the derivation.
+    /// The evaluator has determined that this derivation needs be built and has sent it to the
+    /// scheduler. The derivation stays in this state until the scheduler decides that it is ready
+    /// to be built, which mostly means until all its dependencies have been built.
+    Queued,
+    /// Derivation is waiting to be built.
+    ///
+    /// The scheduler has determined that this derivation is ready to be built. The derivation
+    /// stays in this state until a builder picks it up to perform the actual build step.
+    Buildable,
+    /// Derivation is building.
+    ///
+    /// A builder has picked this derivation up and is now realizing the derivation. The derivation
+    /// build stays in this state until the build completes or is interrupted.
+    Building,
+    /// Derivation has been built, either successfully or not.
+    ///
+    /// This is a terminal state, a derivation build will never leave this state. Depending on the
+    /// outcome of the built, the state of other derivation builds may be changed. If the build
+    /// completed successfully, all direct dependants will be marked as buildable. If the build
+    /// failed, all transitive dependants will be marked as transitive failure.
     Completed(DrvBuildResult),
     /// Build was interrupted before it could complete.
+    ///
+    /// For some interruption kinds, the build will be retried automatically. In those cases, the
+    /// build will be immediately marked as buildable again. Dependants are not affected.
+    ///
+    /// For most interruption kinds however, an automatic retry makes no sense. A new attempt at
+    /// building the derivation may be queued manually or when the job configuration changed. All
+    /// transitive dependants of this derivation will be marked as blocked, until the next build
+    /// attempt. This derivation build will never leave this state in that case.
     Interrupted(DrvBuildInterruptionKind),
-    /// Build depends on a derivation that is [Interrupted][DrvBuildState::Interrupted].
+    /// At least one transitive dependency of this build has failed.
+    ///
+    /// This is a terminal state, a derivation build will never leave this state.
+    TransitiveFailure,
+    /// At least one transitive dependency of this build has been interrupted.
+    ///
+    /// A failing build of another transitive dependency has a higher precedence than this. The
+    /// transitive failure state therefore takes priority over this state and overwrite it.
+    ///
+    /// Otherwise, the derivation build stays in this state until a later build attempt of the
+    /// dependency completes. Every time a build attempt completes, the scheduler checks if a
+    /// previous build attempt has been interrupted, and if so, unblocks all transitive dependants
+    /// again. Once a derivation build is unblocked, it will be queued again.
     Blocked,
 }
 
 impl DrvBuildState {
     pub fn as_i64(&self) -> i64 {
         match self {
-            DrvBuildState::Pending => 1,
+            DrvBuildState::Queued => 1,
+            DrvBuildState::Buildable => 5,
             DrvBuildState::Building => 7, // a lucky number
-            DrvBuildState::Completed(drv_build_result) => match drv_build_result {
-                DrvBuildResult::Success => 42, // found the answer to the Ultimate Question of Life, the Universe, and Everything
-                DrvBuildResult::Failure => -1,
-            },
-            DrvBuildState::Interrupted(drv_build_interruption_kind) => {
-                match drv_build_interruption_kind {
-                    DrvBuildInterruptionKind::OutOfMemory => -404, // 404 Memory Not Found
-                    DrvBuildInterruptionKind::Timeout => -420,     // time for a timeout
-                    DrvBuildInterruptionKind::Cancelled => -86,    // cancel the order
-                    DrvBuildInterruptionKind::ProcessDeath => -666, // number of the beast
-                    DrvBuildInterruptionKind::SchedulerDeath => -13, // an unlucky number
-                }
-            }
+            DrvBuildState::Completed(DrvBuildResult::Success) => 42, // found the answer to the Ultimate Question of Life, the Universe, and Everything
+            DrvBuildState::Completed(DrvBuildResult::Failure) => -1,
+            DrvBuildState::TransitiveFailure => -2,
+            DrvBuildState::Interrupted(DrvBuildInterruptionKind::OutOfMemory) => -404, // 404 Memory Not Found
+            DrvBuildState::Interrupted(DrvBuildInterruptionKind::Timeout) => -420, // time for a timeout
+            DrvBuildState::Interrupted(DrvBuildInterruptionKind::Cancelled) => -86, // cancel the order
+            DrvBuildState::Interrupted(DrvBuildInterruptionKind::ProcessDeath) => -666, // number of the beast
+            DrvBuildState::Interrupted(DrvBuildInterruptionKind::SchedulerDeath) => -13, // an unlucky number
             DrvBuildState::Blocked => 11,
         }
     }
@@ -227,10 +258,12 @@ impl TryFrom<i64> for DrvBuildState {
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
-            1 => Ok(Self::Pending),
+            1 => Ok(Self::Queued),
+            5 => Ok(Self::Buildable),
             7 => Ok(Self::Building),
             42 => Ok(Self::Completed(DrvBuildResult::Success)),
             -1 => Ok(Self::Completed(DrvBuildResult::Failure)),
+            -2 => Ok(Self::TransitiveFailure),
             -404 => Ok(Self::Interrupted(DrvBuildInterruptionKind::OutOfMemory)),
             -420 => Ok(Self::Interrupted(DrvBuildInterruptionKind::Timeout)),
             -86 => Ok(Self::Interrupted(DrvBuildInterruptionKind::Cancelled)),
