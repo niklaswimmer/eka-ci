@@ -230,82 +230,6 @@ pub enum DrvBuildState {
     Blocked,
 }
 
-impl DrvBuildState {
-    pub fn as_i64(&self) -> i64 {
-        match self {
-            DrvBuildState::Queued => 1,
-            DrvBuildState::Buildable => 5,
-            DrvBuildState::Building => 7, // a lucky number
-            DrvBuildState::Completed(DrvBuildResult::Success) => 42, // found the answer to the Ultimate Question of Life, the Universe, and Everything
-            DrvBuildState::Completed(DrvBuildResult::Failure) => -1,
-            DrvBuildState::TransitiveFailure => -2,
-            DrvBuildState::Interrupted(DrvBuildInterruptionKind::OutOfMemory) => -404, // 404 Memory Not Found
-            DrvBuildState::Interrupted(DrvBuildInterruptionKind::Timeout) => -420, // time for a timeout
-            DrvBuildState::Interrupted(DrvBuildInterruptionKind::Cancelled) => -86, // cancel the order
-            DrvBuildState::Interrupted(DrvBuildInterruptionKind::ProcessDeath) => -666, // number of the beast
-            DrvBuildState::Interrupted(DrvBuildInterruptionKind::SchedulerDeath) => -13, // an unlucky number
-            DrvBuildState::Blocked => 11,
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("invalid state number: {0}")]
-pub struct InvalidStateNumber(i64);
-
-impl TryFrom<i64> for DrvBuildState {
-    type Error = InvalidStateNumber;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(Self::Queued),
-            5 => Ok(Self::Buildable),
-            7 => Ok(Self::Building),
-            42 => Ok(Self::Completed(DrvBuildResult::Success)),
-            -1 => Ok(Self::Completed(DrvBuildResult::Failure)),
-            -2 => Ok(Self::TransitiveFailure),
-            -404 => Ok(Self::Interrupted(DrvBuildInterruptionKind::OutOfMemory)),
-            -420 => Ok(Self::Interrupted(DrvBuildInterruptionKind::Timeout)),
-            -86 => Ok(Self::Interrupted(DrvBuildInterruptionKind::Cancelled)),
-            -666 => Ok(Self::Interrupted(DrvBuildInterruptionKind::ProcessDeath)),
-            -13 => Ok(Self::Interrupted(DrvBuildInterruptionKind::SchedulerDeath)),
-            11 => Ok(Self::Blocked),
-            _ => Err(InvalidStateNumber(value)),
-        }
-    }
-}
-
-impl<'q> Encode<'q, Sqlite> for DrvBuildState {
-    fn encode_by_ref(
-        &self,
-        buf: &mut <Sqlite as sqlx::Database>::ArgumentBuffer<'q>,
-    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
-        buf.push(SqliteArgumentValue::Int64(self.as_i64()));
-
-        Ok(IsNull::No)
-    }
-
-    fn size_hint(&self) -> usize {
-        std::mem::size_of::<i64>()
-    }
-}
-
-impl<'r> Decode<'r, Sqlite> for DrvBuildState {
-    fn decode(
-        value: <Sqlite as sqlx::Database>::ValueRef<'r>,
-    ) -> Result<Self, sqlx::error::BoxDynError> {
-        let value = <i64 as Decode<Sqlite>>::decode(value)?;
-
-        Ok(value.try_into()?)
-    }
-}
-
-impl Type<Sqlite> for DrvBuildState {
-    fn type_info() -> <Sqlite as sqlx::Database>::TypeInfo {
-        <i64 as Type<Sqlite>>::type_info()
-    }
-}
-
 /// The result of building a derivation.
 ///
 /// In essence, this enum captures whether the status code returned by the build command was `0`
@@ -400,4 +324,116 @@ pub struct DrvRefs {
     pub referrer: DrvId,
     /// Also known as dependency.
     pub reference: DrvId,
+}
+
+mod state {
+    use sqlx::{Decode, Encode, Sqlite, Type};
+
+    use super::{DrvBuildInterruptionKind, DrvBuildResult, DrvBuildState};
+
+    #[derive(sqlx::Type)]
+    #[repr(i8)]
+    enum DrvBuildStateRepr {
+        Queued = 0,
+        Buildable = 1,
+        Building = 7,
+        CompletedSuccess = 42,
+        CompletedFailure = -1,
+        TransitiveFailure = -2,
+        InterruptedOutOfMemory = -104,
+        InterruptedTimeout = -120,
+        InterruptedCancelled = -86,
+        InterruptedProcessDeath = -66,
+        InterruptedSchedulerDeath = -13,
+        Blocked = 100,
+    }
+
+    impl From<&DrvBuildState> for DrvBuildStateRepr {
+        fn from(value: &DrvBuildState) -> Self {
+            match value {
+                DrvBuildState::Queued => Self::Queued,
+                DrvBuildState::Buildable => Self::Buildable,
+                DrvBuildState::Building => Self::Building,
+                DrvBuildState::Completed(DrvBuildResult::Success) => Self::CompletedSuccess,
+                DrvBuildState::Completed(DrvBuildResult::Failure) => Self::CompletedFailure,
+                DrvBuildState::TransitiveFailure => Self::TransitiveFailure,
+                DrvBuildState::Interrupted(DrvBuildInterruptionKind::OutOfMemory) => {
+                    Self::InterruptedOutOfMemory
+                }
+                DrvBuildState::Interrupted(DrvBuildInterruptionKind::Timeout) => {
+                    Self::InterruptedTimeout
+                }
+                DrvBuildState::Interrupted(DrvBuildInterruptionKind::Cancelled) => {
+                    Self::InterruptedCancelled
+                }
+                DrvBuildState::Interrupted(DrvBuildInterruptionKind::ProcessDeath) => {
+                    Self::InterruptedProcessDeath
+                }
+                DrvBuildState::Interrupted(DrvBuildInterruptionKind::SchedulerDeath) => {
+                    Self::InterruptedSchedulerDeath
+                }
+                DrvBuildState::Blocked => Self::Blocked,
+            }
+        }
+    }
+
+    impl From<DrvBuildStateRepr> for DrvBuildState {
+        fn from(value: DrvBuildStateRepr) -> Self {
+            match value {
+                DrvBuildStateRepr::Queued => Self::Queued,
+                DrvBuildStateRepr::Buildable => Self::Buildable,
+                DrvBuildStateRepr::Building => Self::Building,
+                DrvBuildStateRepr::CompletedSuccess => Self::Completed(DrvBuildResult::Success),
+                DrvBuildStateRepr::CompletedFailure => Self::Completed(DrvBuildResult::Failure),
+                DrvBuildStateRepr::TransitiveFailure => Self::TransitiveFailure,
+                DrvBuildStateRepr::InterruptedOutOfMemory => {
+                    Self::Interrupted(DrvBuildInterruptionKind::OutOfMemory)
+                }
+                DrvBuildStateRepr::InterruptedTimeout => {
+                    Self::Interrupted(DrvBuildInterruptionKind::Timeout)
+                }
+                DrvBuildStateRepr::InterruptedCancelled => {
+                    Self::Interrupted(DrvBuildInterruptionKind::Cancelled)
+                }
+                DrvBuildStateRepr::InterruptedProcessDeath => {
+                    Self::Interrupted(DrvBuildInterruptionKind::ProcessDeath)
+                }
+                DrvBuildStateRepr::InterruptedSchedulerDeath => {
+                    Self::Interrupted(DrvBuildInterruptionKind::SchedulerDeath)
+                }
+                DrvBuildStateRepr::Blocked => Self::Blocked,
+            }
+        }
+    }
+
+    impl<'q> Encode<'q, Sqlite> for DrvBuildState {
+        fn encode_by_ref(
+            &self,
+            buf: &mut <Sqlite as sqlx::Database>::ArgumentBuffer<'q>,
+        ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+            <DrvBuildStateRepr as Encode<'q, Sqlite>>::encode_by_ref(&self.into(), buf)
+        }
+
+        fn size_hint(&self) -> usize {
+            <DrvBuildStateRepr as Encode<'q, Sqlite>>::size_hint(&self.into())
+        }
+    }
+
+    impl<'r> Decode<'r, Sqlite> for DrvBuildState {
+        fn decode(
+            value: <Sqlite as sqlx::Database>::ValueRef<'r>,
+        ) -> Result<Self, sqlx::error::BoxDynError> {
+            Ok(<DrvBuildStateRepr as Decode<Sqlite>>::decode(value)?.into())
+        }
+    }
+
+    impl Type<Sqlite> for DrvBuildState {
+        fn type_info() -> <Sqlite as sqlx::Database>::TypeInfo {
+            <DrvBuildStateRepr as Type<Sqlite>>::type_info()
+        }
+
+        fn compatible(ty: &<Sqlite as sqlx::Database>::TypeInfo) -> bool {
+            <DrvBuildStateRepr as Type<Sqlite>>::compatible(ty)
+        }
+    }
 }
