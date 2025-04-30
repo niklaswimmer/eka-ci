@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use sqlx::migrate;
@@ -5,11 +6,13 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool};
 use tracing::{debug, info};
 
 use super::insert;
-use super::model::{build::DrvBuildMetadata, ForInsert};
+use super::model::{build::DrvBuildMetadata, drv, ForInsert};
 
 #[derive(Clone)]
 pub struct DbService {
-    pool: SqlitePool,
+    // Instead of exposing this, we should probably have a function
+    // where people can get a cloned instance
+    pub pool: SqlitePool,
 }
 
 impl DbService {
@@ -45,5 +48,16 @@ impl DbService {
         metadata: ForInsert<DrvBuildMetadata>,
     ) -> anyhow::Result<DrvBuildMetadata> {
         insert::new_drv_build_metadata(metadata, &self.pool).await
+    }
+
+    pub async fn has_drv(&self, drv_path: &str) -> anyhow::Result<bool> {
+        drv::has_drv(&self.pool, drv_path).await
+    }
+
+    pub async fn insert_drv_graph(
+        &self,
+        drv_graph: HashMap<String, Vec<String>>,
+    ) -> anyhow::Result<()> {
+        drv::insert_drv_graph(&self.pool, drv_graph).await
     }
 }

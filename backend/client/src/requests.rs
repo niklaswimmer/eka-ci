@@ -51,6 +51,9 @@ fn handle_response(response: ClientResponse) {
         r::Build(info) => {
             println!("Queued Successfully: {}", &info.enqueued);
         }
+        r::Job(info) => {
+            println!("Queued Successfully: {}", &info.enqueued);
+        }
     }
 }
 

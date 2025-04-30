@@ -1,5 +1,3 @@
-use anyhow;
-use sqlx;
 use sqlx::SqlitePool;
 
 use super::model::{
@@ -52,7 +50,7 @@ RETURNING derivation, build_attempt, state, timestamp
         "#,
     )
     .bind(&event.build.derivation)
-    .bind(&event.build.build_attempt)
+    .bind(event.build.build_attempt)
     .bind(&event.state)
     .fetch_one(pool)
     .await?;
