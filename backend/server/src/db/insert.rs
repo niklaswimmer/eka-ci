@@ -37,8 +37,8 @@ RETURNING derivation, build_attempt, git_repo, git_commit, build_command
 }
 
 pub async fn new_drv_build_event(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Sqlite>,
     event: ForInsert<DrvBuildEvent>,
-    pool: &SqlitePool,
 ) -> anyhow::Result<DrvBuildEvent> {
     let event = event.0;
     let event = sqlx::query_as(
@@ -52,7 +52,7 @@ RETURNING derivation, build_attempt, state, timestamp
     .bind(&event.build.derivation)
     .bind(event.build.build_attempt)
     .bind(&event.state)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
 
     Ok(event)
@@ -146,7 +146,7 @@ VALUES (?, 1, 'https://github.com/ekala-project/corepkgs', '00000000000000000000
             DrvBuildState::Completed(DrvBuildResult::Success),
         );
 
-        let inserted = new_drv_build_event(event.clone(), &pool).await?;
+        let inserted = new_drv_build_event(&pool, event.clone()).await?;
 
         // some sanity checks that the correct event record is returned
         assert_eq!(&inserted.build.derivation, &event.0.build.derivation);
